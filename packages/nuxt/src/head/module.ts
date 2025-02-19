@@ -1,5 +1,5 @@
 import { resolve } from 'pathe'
-import { addComponent, addImportsSources, addPlugin, addTemplate, defineNuxtModule, tryResolveModule } from '@nuxt/kit'
+import { addComponent, addImportsSources, addPlugin, addTemplate, defineNuxtModule, directoryToURL, tryResolveModule } from '@nuxt/kit'
 import type { NuxtOptions } from '@nuxt/schema'
 import { distDir } from '../dirs'
 
@@ -7,7 +7,8 @@ const components = ['NoScript', 'Link', 'Base', 'Title', 'Meta', 'Style', 'Head'
 
 export default defineNuxtModule<NuxtOptions['unhead']>({
   meta: {
-    name: 'meta',
+    name: 'nuxt:meta',
+    configKey: 'unhead',
   },
   async setup (options, nuxt) {
     const runtimeDir = resolve(distDir, 'head/runtime')
@@ -51,7 +52,8 @@ export default defineNuxtModule<NuxtOptions['unhead']>({
     })
 
     // Opt-out feature allowing dependencies using @vueuse/head to work
-    const unheadVue = await tryResolveModule('@unhead/vue', nuxt.options.modulesDir) || '@unhead/vue'
+    const importPaths = nuxt.options.modulesDir.map(d => directoryToURL(d))
+    const unheadVue = await tryResolveModule('@unhead/vue', importPaths) || '@unhead/vue'
 
     addTemplate({
       filename: 'unhead-plugins.mjs',
@@ -75,8 +77,8 @@ export default import.meta.server ? [CapoPlugin({ track: true })] : [];`
 
     // template is only exposed in nuxt context, expose in nitro context as well
     nuxt.hooks.hook('nitro:config', (config) => {
-      config.virtual!['#internal/unhead-plugins.mjs'] = () => nuxt.vfs['#build/unhead-plugins']
-      config.virtual!['#internal/unhead.config.mjs'] = () => nuxt.vfs['#build/unhead.config']
+      config.virtual!['#internal/unhead-plugins.mjs'] = () => nuxt.vfs['#build/unhead-plugins.mjs']
+      config.virtual!['#internal/unhead.config.mjs'] = () => nuxt.vfs['#build/unhead.config.mjs']
     })
 
     // Add library-specific plugin

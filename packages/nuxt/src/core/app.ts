@@ -1,14 +1,15 @@
 import { promises as fsp, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'pathe'
 import { defu } from 'defu'
-import { findPath, logger, normalizePlugin, normalizeTemplate, resolveAlias, resolveFiles, resolvePath } from '@nuxt/kit'
+import { findPath, normalizePlugin, normalizeTemplate, resolveAlias, resolveFiles, resolvePath } from '@nuxt/kit'
 import type { Nuxt, NuxtApp, NuxtPlugin, NuxtTemplate, ResolvedNuxtTemplate } from 'nuxt/schema'
 
+import type { PluginMeta } from 'nuxt/app'
+
+import { logger } from '../utils'
 import * as defaultTemplates from './templates'
 import { getNameFromPath, hasSuffix, uniqueBy } from './utils'
 import { extractMetadata, orderMap } from './plugins/plugin-metadata'
-
-import type { PluginMeta } from '#app'
 
 export function createApp (nuxt: Nuxt, options: Partial<NuxtApp> = {}): NuxtApp {
   return defu(options, {
@@ -37,7 +38,7 @@ export async function generateApp (nuxt: Nuxt, app: NuxtApp, options: { filter?:
   await nuxt.callHook('app:templates', app)
 
   // Normalize templates
-  app.templates = app.templates.map(tmpl => normalizeTemplate(tmpl))
+  app.templates = app.templates.map(tmpl => normalizeTemplate(tmpl, nuxt.options.buildDir))
 
   // compile plugins first as they are needed within the nuxt.vfs
   // in order to annotate templated plugins
@@ -56,11 +57,12 @@ export async function generateApp (nuxt: Nuxt, app: NuxtApp, options: { filter?:
   const templateContext = { nuxt, app }
 
   const writes: Array<() => void> = []
+  const dirs = new Set<string>()
   const changedTemplates: Array<ResolvedNuxtTemplate<any>> = []
-
+  const FORWARD_SLASH_RE = /\//g
   async function processTemplate (template: ResolvedNuxtTemplate) {
     const fullPath = template.dst || resolve(nuxt.options.buildDir, template.filename!)
-    const mark = performance.mark(fullPath)
+    const start = performance.now()
     const oldContents = nuxt.vfs[fullPath]
     const contents = await compileTemplate(template, templateContext).catch((e) => {
       logger.error(`Could not compile template \`${template.filename}\`.`)
@@ -72,29 +74,27 @@ export async function generateApp (nuxt: Nuxt, app: NuxtApp, options: { filter?:
     if (template.modified) {
       nuxt.vfs[fullPath] = contents
 
-      const aliasPath = '#build/' + template.filename!.replace(/\.\w+$/, '')
+      const aliasPath = '#build/' + template.filename
       nuxt.vfs[aliasPath] = contents
 
       // In case a non-normalized absolute path is called for on Windows
       if (process.platform === 'win32') {
-        nuxt.vfs[fullPath.replace(/\//g, '\\')] = contents
+        nuxt.vfs[fullPath.replace(FORWARD_SLASH_RE, '\\')] = contents
       }
 
       changedTemplates.push(template)
     }
 
-    const perf = performance.measure(fullPath, mark.name)
-    const setupTime = Math.round((perf.duration * 100)) / 100
+    const perf = performance.now() - start
+    const setupTime = Math.round((perf * 100)) / 100
 
-    if (nuxt.options.debug || setupTime > 500) {
+    if ((nuxt.options.debug && nuxt.options.debug.templates) || setupTime > 500) {
       logger.info(`Compiled \`${template.filename}\` in ${setupTime}ms`)
     }
 
     if (template.modified && template.write) {
-      writes.push(() => {
-        mkdirSync(dirname(fullPath), { recursive: true })
-        writeFileSync(fullPath, contents, 'utf8')
-      })
+      dirs.add(dirname(fullPath))
+      writes.push(() => writeFileSync(fullPath, contents, 'utf8'))
     }
   }
 
@@ -103,7 +103,12 @@ export async function generateApp (nuxt: Nuxt, app: NuxtApp, options: { filter?:
 
   // Write template files in single synchronous step to avoid (possible) additional
   // runtime overhead of cascading HMRs from vite/webpack
-  for (const write of writes) { write() }
+  for (const dir of dirs) {
+    mkdirSync(dir, { recursive: true })
+  }
+  for (const write of writes) {
+    write()
+  }
 
   if (changedTemplates.length) {
     await nuxt.callHook('app:templatesGenerated', app, changedTemplates, options)
@@ -131,29 +136,21 @@ async function compileTemplate<T> (template: NuxtTemplate<T>, ctx: { nuxt: Nuxt,
 
 export async function resolveApp (nuxt: Nuxt, app: NuxtApp) {
   // Resolve main (app.vue)
-  if (!app.mainComponent) {
-    app.mainComponent = await findPath(
-      nuxt.options._layers.flatMap(layer => [
-        join(layer.config.srcDir, 'App'),
-        join(layer.config.srcDir, 'app'),
-      ]),
-    )
-  }
-  if (!app.mainComponent) {
-    app.mainComponent = resolve(nuxt.options.appDir, 'components/welcome.vue')
-  }
+  app.mainComponent ||= await findPath(
+    nuxt.options._layers.flatMap(layer => [
+      join(layer.config.srcDir, 'App'),
+      join(layer.config.srcDir, 'app'),
+    ]),
+  )
+  app.mainComponent ||= resolve(nuxt.options.appDir, 'components/welcome.vue')
 
   // Resolve root component
-  if (!app.rootComponent) {
-    app.rootComponent = await findPath(['~/app.root', resolve(nuxt.options.appDir, 'components/nuxt-root.vue')])
-  }
+  app.rootComponent ||= await findPath(['~/app.root', resolve(nuxt.options.appDir, 'components/nuxt-root.vue')])
 
   // Resolve error component
-  if (!app.errorComponent) {
-    app.errorComponent = (await findPath(
-      nuxt.options._layers.map(layer => join(layer.config.srcDir, 'error')),
-    )) ?? resolve(nuxt.options.appDir, 'components/nuxt-error-page.vue')
-  }
+  app.errorComponent ||= (await findPath(
+    nuxt.options._layers.map(layer => join(layer.config.srcDir, 'error')),
+  )) ?? resolve(nuxt.options.appDir, 'components/nuxt-error-page.vue')
 
   // Resolve layouts/ from all config layers
   const layerConfigs = nuxt.options._layers.map(layer => layer.config)
@@ -169,7 +166,7 @@ export async function resolveApp (nuxt: Nuxt, app: NuxtApp) {
         logger.warn(`No layout name could be resolved for \`~/${relative(nuxt.options.srcDir, file)}\`. Bear in mind that \`index\` is ignored for the purpose of creating a layout name.`)
         continue
       }
-      app.layouts[name] = app.layouts[name] || { name, file }
+      app.layouts[name] ||= { name, file }
     }
   }
 
@@ -254,7 +251,7 @@ export async function annotatePlugins (nuxt: Nuxt, plugins: NuxtPlugin[]) {
   const _plugins: Array<NuxtPlugin & Omit<PluginMeta, 'enforce'>> = []
   for (const plugin of plugins) {
     try {
-      const code = plugin.src in nuxt.vfs ? nuxt.vfs[plugin.src] : await fsp.readFile(plugin.src!, 'utf-8')
+      const code = plugin.src in nuxt.vfs ? nuxt.vfs[plugin.src]! : await fsp.readFile(plugin.src!, 'utf-8')
       _plugins.push({
         ...await extractMetadata(code, IS_TSX.test(plugin.src) ? 'tsx' : 'ts'),
         ...plugin,

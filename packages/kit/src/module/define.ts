@@ -55,17 +55,17 @@ function _defineNuxtModule<
     inlineOptions?: Partial<TOptions>,
     nuxt: Nuxt = useNuxt(),
   ): Promise<
-    TWith extends true
-      ? ResolvedModuleOptions<TOptions, TOptionsDefaults>
-      : TOptions
-  > {
+      TWith extends true
+        ? ResolvedModuleOptions<TOptions, TOptionsDefaults>
+        : TOptions
+    > {
     const nuxtConfigOptionsKey = module.meta.configKey || module.meta.name
 
     const nuxtConfigOptions: Partial<TOptions> = nuxtConfigOptionsKey && nuxtConfigOptionsKey in nuxt.options ? nuxt.options[<keyof NuxtOptions> nuxtConfigOptionsKey] : {}
 
     const optionsDefaults: TOptionsDefaults =
       module.defaults instanceof Function
-        ? module.defaults(nuxt)
+        ? await module.defaults(nuxt)
         : module.defaults ?? <TOptionsDefaults> {}
 
     let options = defu(inlineOptions, nuxtConfigOptions, optionsDefaults)
@@ -79,15 +79,15 @@ function _defineNuxtModule<
   }
 
   // Module format is always a simple function
-  async function normalizedModule (this: any, inlineOptions: Partial<TOptions>, nuxt: Nuxt): Promise<ModuleSetupReturn> {
+  async function normalizedModule (inlineOptions: Partial<TOptions>, nuxt = tryUseNuxt()!): Promise<ModuleSetupReturn> {
     if (!nuxt) {
-      nuxt = tryUseNuxt() || this.nuxt /* invoked by nuxt 2 */
+      throw new TypeError('Cannot use module outside of Nuxt context')
     }
 
     // Avoid duplicate installs
     const uniqueKey = module.meta.name || module.meta.configKey
     if (uniqueKey) {
-      nuxt.options._requiredModules = nuxt.options._requiredModules || {}
+      nuxt.options._requiredModules ||= {}
       if (nuxt.options._requiredModules[uniqueKey]) {
         return false
       }
@@ -112,16 +112,15 @@ function _defineNuxtModule<
     }
 
     // Call setup
-    const key = `nuxt:module:${uniqueKey || (Math.round(Math.random() * 10000))}`
-    const mark = performance.mark(key)
+    const start = performance.now()
     const res = await module.setup?.call(null as any, _options, nuxt) ?? {}
-    const perf = performance.measure(key, mark.name)
-    const setupTime = Math.round((perf.duration * 100)) / 100
+    const perf = performance.now() - start
+    const setupTime = Math.round((perf * 100)) / 100
 
     // Measure setup time
     if (setupTime > 5000 && uniqueKey !== '@nuxt/telemetry') {
       logger.warn(`Slow module \`${uniqueKey || '<no name>'}\` took \`${setupTime}ms\` to setup.`)
-    } else if (nuxt.options.debug) {
+    } else if (nuxt.options.debug && nuxt.options.debug.modules) {
       logger.info(`Module \`${uniqueKey || '<no name>'}\` took \`${setupTime}ms\` to setup.`)
     }
 

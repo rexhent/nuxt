@@ -1,12 +1,12 @@
-import { defineUntypedSchema } from 'untyped'
+import { defineResolvers } from '../utils/definition'
 
-export default defineUntypedSchema({
+export default defineResolvers({
   /**
    * Configure Nuxt component auto-registration.
    *
    * Any components in the directories configured here can be used throughout your
    * pages, layouts (and other components) without needing to explicitly import them.
-   * @see https://nuxt.com/docs/guide/directory-structure/components
+   * @see [`components/` directory documentation](https://nuxt.com/docs/guide/directory-structure/components)
    * @type {boolean | typeof import('../src/types/components').ComponentsOptions | typeof import('../src/types/components').ComponentsOptions['dirs']}
    */
   components: {
@@ -14,20 +14,28 @@ export default defineUntypedSchema({
       if (Array.isArray(val)) {
         return { dirs: val }
       }
-      if (val === undefined || val === true) {
-        return { dirs: [{ path: '~/components/global', global: true }, '~/components'] }
+      if (val === false) {
+        return { dirs: [] }
       }
-      return val
+      return {
+        dirs: [{ path: '~/components/global', global: true }, '~/components'],
+        ...typeof val === 'object' ? val : {},
+      }
     },
   },
 
   /**
    * Configure how Nuxt auto-imports composables into your application.
-   * @see [Nuxt 3 documentation](https://nuxt.com/docs/guide/directory-structure/composables)
+   * @see [Nuxt documentation](https://nuxt.com/docs/guide/directory-structure/composables)
    * @type {typeof import('../src/types/imports').ImportsOptions}
    */
   imports: {
     global: false,
+    /**
+     * Whether to scan your `composables/` and `utils/` directories for composables to auto-import.
+     * Auto-imports registered by Nuxt or other modules, such as imports from `vue` or `nuxt`, will still be enabled.
+     */
+    scan: true,
 
     /**
      * An array of custom directories that will be auto-imported.

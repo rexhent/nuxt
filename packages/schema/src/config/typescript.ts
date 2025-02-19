@@ -1,6 +1,6 @@
-import { defineUntypedSchema } from 'untyped'
+import { defineResolvers } from '../utils/definition'
 
-export default defineUntypedSchema({
+export default defineResolvers({
   /**
    * Configuration for Nuxt's TypeScript integration.
    *
@@ -20,10 +20,20 @@ export default defineUntypedSchema({
      * builder environment types (with `false`) to handle this fully yourself, or opt for a 'shared' option.
      *
      * The 'shared' option is advised for module authors, who will want to support multiple possible builders.
-     * @type {'vite' | 'webpack' | 'shared' | false | undefined}
+     * @type {'vite' | 'webpack' | 'rspack' | 'shared' | false | undefined | null}
      */
     builder: {
-      $resolve: val => val ?? null,
+      $resolve: (val) => {
+        const validBuilderTypes = ['vite', 'webpack', 'rspack', 'shared'] as const
+        type ValidBuilderType = typeof validBuilderTypes[number]
+        if (typeof val === 'string' && validBuilderTypes.includes(val as ValidBuilderType)) {
+          return val as ValidBuilderType
+        }
+        if (val === false) {
+          return false
+        }
+        return null
+      },
     },
 
     /**
@@ -35,6 +45,7 @@ export default defineUntypedSchema({
         const defaults = [
           // Nitro auto-imported/augmented dependencies
           'nitro/types',
+          'nitro/runtime',
           'defu',
           'h3',
           'consola',
@@ -45,7 +56,6 @@ export default defineUntypedSchema({
           'vue',
           '@vue/runtime-core',
           '@vue/compiler-sfc',
-          '@vue/runtime-dom',
           'vue-router',
           'vue-router/auto-routes',
           'unplugin-vue-router/client',
@@ -66,14 +76,14 @@ export default defineUntypedSchema({
      *
      * If set to true, this will type check in development. You can restrict this to build-time type checking by setting it to `build`.
      * Requires to install `typescript` and `vue-tsc` as dev dependencies.
-     * @see https://nuxt.com/docs/guide/concepts/typescript
+     * @see [Nuxt TypeScript docs](https://nuxt.com/docs/guide/concepts/typescript)
      * @type {boolean | 'build'}
      */
     typeCheck: false,
 
     /**
      * You can extend generated `.nuxt/tsconfig.json` using this option.
-     * @type {0 extends 1 & VueCompilerOptions ? typeof import('pkg-types')['TSConfig'] : typeof import('pkg-types')['TSConfig'] & { vueCompilerOptions?: typeof import('@vue/language-core')['VueCompilerOptions']}}
+     * @type {0 extends 1 & VueCompilerOptions ? typeof import('pkg-types')['TSConfig'] : typeof import('pkg-types')['TSConfig'] & { vueCompilerOptions?: Omit<typeof import('@vue/language-core')['VueCompilerOptions'], 'plugins'> & { plugins?: string[] } }}
      */
     tsConfig: {},
 

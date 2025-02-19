@@ -1,7 +1,6 @@
 import type { Configuration } from 'webpack'
 import type { Nuxt, NuxtOptions } from '@nuxt/schema'
 import { logger } from '@nuxt/kit'
-import { cloneDeep } from 'lodash-es'
 import { toArray } from './index'
 
 export interface WebpackConfigContext {
@@ -17,7 +16,7 @@ export interface WebpackConfigContext {
   transpile: RegExp[]
 }
 
-type WebpackConfigPreset = (ctx: WebpackConfigContext, options?: object) => void
+type WebpackConfigPreset = (ctx: WebpackConfigContext, options?: object) => void | Promise<void>
 type WebpackConfigPresetItem = WebpackConfigPreset | [WebpackConfigPreset, any]
 
 export function createWebpackConfigContext (nuxt: Nuxt): WebpackConfigContext {
@@ -37,12 +36,12 @@ export function createWebpackConfigContext (nuxt: Nuxt): WebpackConfigContext {
   }
 }
 
-export function applyPresets (ctx: WebpackConfigContext, presets: WebpackConfigPresetItem | WebpackConfigPresetItem[]) {
+export async function applyPresets (ctx: WebpackConfigContext, presets: WebpackConfigPresetItem | WebpackConfigPresetItem[]) {
   for (const preset of toArray(presets)) {
     if (Array.isArray(preset)) {
-      preset[0](ctx, preset[1])
+      await preset[0](ctx, preset[1])
     } else {
-      preset(ctx)
+      await preset(ctx)
     }
   }
 }
@@ -62,10 +61,4 @@ export function fileName (ctx: WebpackConfigContext, key: string) {
   }
 
   return fileName
-}
-
-export function getWebpackConfig (ctx: WebpackConfigContext): Configuration {
-  // Clone to avoid leaking config between Client and Server
-  // TODO: rewrite webpack implementation to avoid necessity for this
-  return cloneDeep(ctx.config)
 }
